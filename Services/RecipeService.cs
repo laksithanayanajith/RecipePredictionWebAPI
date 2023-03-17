@@ -2,6 +2,8 @@
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Data;
 using RecipePredictionWebAPI.Models;
+using Tensorflow.Contexts;
+using static Microsoft.ML.DataOperationsCatalog;
 
 namespace RecipePredictionWebAPI.Services
 {
@@ -16,23 +18,19 @@ namespace RecipePredictionWebAPI.Services
         public ITransformer TrainModel()
         {
             // Load data
-            var data = _mlContext.Data.LoadFromTextFile<FoodRecipe>("./Data/recipedata.csv", separatorChar: ',', hasHeader: true);
+            var data = _mlContext.Data.LoadFromTextFile<FoodRecipe>("./Data/recipedata.xlsx", separatorChar: ',', hasHeader: true);
 
             // Split data
             var trainTestSplit = _mlContext.Data.TrainTestSplit(data, testFraction: 0.3);
 
-            // Define pipeline
-            var pipeline = _mlContext.Transforms
-                .Text.FeaturizeText("Features", nameof(FoodRecipe.Ingredients))
-                .Append(_mlContext.Transforms.Conversion.MapValueToKey(nameof(FoodRecipe.Recipe)))
-                .Append(_mlContext.Transforms
-                    .Concatenate("Features", "Features")
-                    .Append(_mlContext.Transforms.NormalizeMinMax("Features")))
-                .Append(_mlContext.Transforms.Conversion
-                    .MapKeyToValue(nameof(FoodRecipePrediction.Recipe), nameof(FoodRecipePrediction.Recipe)))
-                .Append(_mlContext.MulticlassClassification
-                    .Trainers.SdcaNonCalibrated());
-
+           
+            //Create pipeline
+            var pipeline = _mlContext.Transforms.Text.FeaturizeText("Ingredients", "Features")
+    .Append(_mlContext.Transforms.CopyColumns("Recipe", "Label"))
+    .Append(_mlContext.Transforms.Conversion.MapValueToKey("Label"))
+    .Append(_mlContext.Transforms.Text.FeaturizeText("Recipe", "RecipeFeatures"))
+    .Append(_mlContext.Transforms.Concatenate("Features", "RecipeFeatures"))
+    .Append(_mlContext.Transforms.NormalizeMinMax("Features", "Features"));
 
             // Train model
             var model = pipeline.Fit(trainTestSplit.TrainSet);
@@ -44,15 +42,18 @@ namespace RecipePredictionWebAPI.Services
             Console.WriteLine($"Log-loss: {metrics.LogLoss}");
 
             ModelEvaluationResult modelEvaluationResult = new ModelEvaluationResult { Model = model, Metrics = metrics };
-            return (ITransformer)modelEvaluationResult;
+            Console.WriteLine($"modelEvaluationResult: {modelEvaluationResult}");
 
-            //return model;
+            _mlContext.Model.Save(model, trainTestSplit.TrainSet.Schema, "./Models/MLModel.zip");
+
+
+            return model;
         }
 
         public string GetRecipe(string ingredients)
         {
             // Load trained model
-            var model = _mlContext.Model.Load("./MLModel.zip", out var schema);
+            var model = _mlContext.Model.Load("./Models/MLModel.zip", out var schema);
 
             // Create prediction engine
             var predictionEngine = _mlContext.Model.CreatePredictionEngine<FoodRecipe, FoodRecipePrediction>(model);

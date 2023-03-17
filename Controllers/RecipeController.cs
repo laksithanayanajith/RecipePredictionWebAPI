@@ -4,6 +4,7 @@ using RecipePredictionWebAPI.Models;
 using RecipePredictionWebAPI.Services;
 using System.Formats.Asn1;
 using System.Globalization;
+using OfficeOpenXml;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
@@ -14,9 +15,14 @@ namespace RecipePredictionWebAPI.Controllers
     public class RecipeController : ControllerBase
     {
         private readonly RecipeService _recipeService;
+        private FileInfo file;
+
         public RecipeController(RecipeService recipeService)
         {
             _recipeService = recipeService;
+
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            file = new FileInfo("./Data/recipedata.xlsx");
         }
         // GET: api/<RecipeController>
         [HttpGet("{ingredients}")]
@@ -35,29 +41,47 @@ namespace RecipePredictionWebAPI.Controllers
 
         // POST api/<RecipeController>
         [HttpPost]
-        public IActionResult AddRecipe(FoodRecipe recipe)
+        public async Task<IActionResult> AddRecipe(FoodRecipe recipe)
         {
             try
             {
                 // Append the new recipe to the CSV file
-                using (var streamWriter = new StreamWriter("./Data/recipedata.csv", true))
-                using (var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture))
+                if ((recipe is not null) && (file is not null))
                 {
-                    if (recipe is not null)
-                    {
-                        csvWriter.WriteRecord(recipe);
-                    }
-                    else
-                    {
-                        return BadRequest("Recipe is empty!");
-                    }
+                    await SaveExcelFile(recipe, file);
                 }
-
-                return Ok();
+                else
+                {
+                    return NoContent();
+                }
             }
             catch (Exception ex)
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, ex.Message);
+            }
+
+            return Ok();
+        }
+
+        private async Task SaveExcelFile(FoodRecipe recipe, FileInfo file)
+        {
+            List<FoodRecipe> recipelist = new List<FoodRecipe> { recipe };
+
+            using (var package = new ExcelPackage(file))
+            {
+                try
+                {
+                    ExcelWorksheet ws = package.Workbook.Worksheets.Add("MainReport");
+
+                    ExcelRangeBase range = ws.Cells["A1"].LoadFromCollection(recipelist, true);
+                    range.AutoFitColumns();
+
+                    await package.SaveAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
             }
         }
     }
